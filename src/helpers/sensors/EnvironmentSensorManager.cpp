@@ -160,6 +160,30 @@ static Adafruit_VL53L0X VL53L0X;
 static RAK12035_SoilMoisture RAK12035;
 #endif
 
+#if ENV_INCLUDE_ARGENT_WIND
+#include "ArgentWind.h"
+#include "LPPDataHelpers.h"
+static TwoWire* argent_wind_wire = nullptr;
+static uint8_t  argent_wind_addr = 0;
+
+// CayenneLPP::addField() rejects types the library doesn't know, such as the wind and rain types. A
+// pointer to a protected member, taken through this subclass, can be used on any CayenneLPP.
+struct LPPRawField : CayenneLPP {
+  static void addU16(CayenneLPP& lpp, uint8_t channel, uint8_t type, uint16_t value) {
+    uint8_t* CayenneLPP::* buffer = &LPPRawField::_buffer;
+    uint8_t  CayenneLPP::* cursor = &LPPRawField::_cursor;
+    uint8_t  CayenneLPP::* maxsize = &LPPRawField::_maxsize;
+    if (lpp.*cursor + 4 > lpp.*maxsize) return;
+    uint8_t* p = &(lpp.*buffer)[lpp.*cursor];
+    p[0] = channel;
+    p[1] = type;
+    p[2] = value >> 8;  // LPP is big-endian
+    p[3] = value & 0xFF;
+    lpp.*cursor += 4;
+  }
+};
+#endif
+
 #if ENV_INCLUDE_GPS && defined(RAK_BOARD) && !defined(RAK_WISMESH_TAG)
 #define RAK_WISBLOCK_GPS
 #endif
@@ -475,6 +499,53 @@ static void query_rak12035(uint8_t ch, uint8_t sub_ch, CayenneLPP& lpp) {
 }
 #endif
 
+#if ENV_INCLUDE_ARGENT_WIND
+static bool read_argent_wind(ArgentWindReading& reading) {
+  uint8_t map[ARGENT_WIND_MAP_SIZE];
+  argent_wind_wire->beginTransmission(argent_wind_addr);
+  argent_wind_wire->write((uint8_t)0x00);
+  uint8_t err = argent_wind_wire->endTransmission();
+  if (err != 0) {
+    MESH_DEBUG_PRINTLN("ArgentWind: register pointer write failed, error %d", err);
+    return false;
+  }
+  delayMicroseconds(ARGENT_WIND_WRITE_TO_READ_US);
+  uint8_t n = argent_wind_wire->requestFrom(argent_wind_addr, (uint8_t)ARGENT_WIND_MAP_SIZE);
+  if (n != ARGENT_WIND_MAP_SIZE) {
+    MESH_DEBUG_PRINTLN("ArgentWind: read %d of %d bytes", n, ARGENT_WIND_MAP_SIZE);
+    return false;
+  }
+  for (uint8_t i = 0; i < ARGENT_WIND_MAP_SIZE; i++) {
+    map[i] = argent_wind_wire->read();
+  }
+  if (!reading.decode(map)) {
+    MESH_DEBUG_PRINTLN("ArgentWind: unexpected device ID %02X or map version %d", map[0], map[1]);
+    return false;
+  }
+  return true;
+}
+static uint8_t init_argent_wind(TwoWire* wire, uint8_t addr) {
+  argent_wind_wire = wire;
+  argent_wind_addr = addr;
+  ArgentWindReading reading;
+  return read_argent_wind(reading) ? 1 : 0;  // checks the device ID, so another device here isn't claimed
+}
+static void query_argent_wind(uint8_t ch, uint8_t, CayenneLPP& lpp) {
+  ArgentWindReading reading;
+  if (!read_argent_wind(reading)) return;
+  if (reading.hasWind()) {
+    LPPRawField::addU16(lpp, ch, LPP_WIND_SPEED, reading.wind_avg);
+    LPPRawField::addU16(lpp, ch, LPP_WIND_GUST, reading.wind_gust);
+  }
+  if (reading.hasDirection()) {
+    lpp.addDirection(ch, reading.directionDegrees());
+  }
+  if (reading.hasRain()) {
+    LPPRawField::addU16(lpp, ch, LPP_RAIN, reading.rainTenthsMm());
+  }
+}
+#endif
+
 #if ENV_INCLUDE_BME680_BSEC
 static void bsec_load_state() {
   using namespace Adafruit_LittleFS_Namespace;
@@ -607,6 +678,10 @@ static const SensorDef SENSOR_TABLE[] = {
 #endif
 #if ENV_INCLUDE_RAK12035
   { TELEM_RAK12035_ADDRESS,"RAK12035",     init_rak12035, query_rak12035 },
+#endif
+#if ENV_INCLUDE_ARGENT_WIND
+  { ARGENT_WIND_ADDRESS,     "ArgentWind",   init_argent_wind, query_argent_wind },
+  { ARGENT_WIND_ALT_ADDRESS, "ArgentWind",   init_argent_wind, query_argent_wind },
 #endif
   { 0, nullptr, nullptr, nullptr }  // sentinel — keeps the array non-empty
 };
