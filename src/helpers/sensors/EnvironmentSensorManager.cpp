@@ -4,8 +4,12 @@
 
 #if ENV_PIN_SDA && ENV_PIN_SCL
 #define TELEM_WIRE &Wire1  // Use Wire1 as the I2C bus for Environment Sensors
+#define TELEM_PIN_SDA ENV_PIN_SDA
+#define TELEM_PIN_SCL ENV_PIN_SCL
 #else
 #define TELEM_WIRE &Wire  // Use default I2C bus for Environment Sensors
+#define TELEM_PIN_SDA PIN_WIRE_SDA
+#define TELEM_PIN_SCL PIN_WIRE_SCL
 #endif
 
 // ============================================================
@@ -247,6 +251,44 @@ static void scanI2CBus(TwoWire* wire, bool found[128]) {
     found[addr] = (wire->endTransmission() == 0);
   }
 }
+
+// ============================================================
+// I2C bus guard
+// The nRF52 Wire driver has no timeout: with SDA or SCL held
+// low it waits forever, hanging the node until it is power
+// cycled. Check the bus is idle before using it, and clock a
+// stuck target free when that's possible.
+// ============================================================
+
+#ifdef NRF52_PLATFORM
+#include "I2CBusRecovery.h"
+
+// The telemetry bus pins driven open-drain: an output low pulls a line low, an input releases it.
+struct TelemI2CPins {
+  bool sda() { return digitalRead(TELEM_PIN_SDA); }
+  bool scl() { return digitalRead(TELEM_PIN_SCL); }
+  void releaseSda() { pinMode(TELEM_PIN_SDA, INPUT_PULLUP); }
+  void releaseScl() { pinMode(TELEM_PIN_SCL, INPUT_PULLUP); }
+  void pullSdaLow() { digitalWrite(TELEM_PIN_SDA, LOW); pinMode(TELEM_PIN_SDA, OUTPUT); }
+  void pullSclLow() { digitalWrite(TELEM_PIN_SCL, LOW); pinMode(TELEM_PIN_SCL, OUTPUT); }
+  void halfPeriod() { delayMicroseconds(5); }  // 100kHz
+};
+
+static bool telemBusReady() {
+  TelemI2CPins pins;
+  if (pins.sda() && pins.scl()) return true;  // Wire leaves the pins' inputs connected, so this is safe
+
+  TwoWire* wire = TELEM_WIRE;
+  wire->end();  // hands the pins back to the GPIO
+  bool ok = i2cRecoverBus(pins);
+  wire->begin();
+  MESH_DEBUG_PRINTLN("I2C bus was stuck: %s", ok ? "recovered" : "still stuck, skipping I2C");
+  return ok;
+}
+#else
+// Other platforms' Wire drivers time out instead of hanging.
+static bool telemBusReady() { return true; }
+#endif
 
 // ============================================================
 // Per-sensor init and query functions
@@ -719,7 +761,9 @@ bool EnvironmentSensorManager::begin() {
 
   // Scan the I2C bus before touching any sensor library.
   bool detected[128] = {};
-  scanI2CBus(TELEM_WIRE, detected);
+  if (telemBusReady()) {
+    scanI2CBus(TELEM_WIRE, detected);
+  }
 
   // Walk the sensor table and initialize only detected devices.
   _active_sensor_count = 0;
@@ -763,7 +807,8 @@ bool EnvironmentSensorManager::querySensors(uint8_t requester_permissions, Cayen
     telemetry.addGPS(TELEM_CHANNEL_SELF, node_lat, node_lon, node_altitude);
   }
 
-  if (requester_permissions & TELEM_PERM_ENVIRONMENT) {
+  // Every sensor in the table is on the I2C bus, so a stuck bus skips them all.
+  if ((requester_permissions & TELEM_PERM_ENVIRONMENT) && _active_sensor_count > 0 && telemBusReady()) {
     for (int i = 0; i < _active_sensor_count; i++) {
       _active_sensors[i].query(next_available_channel, _active_sensors[i].sub_channel, telemetry);
       next_available_channel++;
