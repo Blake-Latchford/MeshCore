@@ -35,6 +35,8 @@
 #define LPP_WIND_SPEED 129          // 2 bytes, 0.01 m/s, unsigned
 #define LPP_WIND_GUST 137           // 2 bytes, 0.01 m/s, unsigned
 #define LPP_RAIN 139                // 2 bytes, 0.1 mm, unsigned
+// Not in meshcore-sar either; 140 is unused there.
+#define LPP_WIND_DIRECTION_STDDEV 140  // 2 bytes, 0.1 deg, unsigned
 
 // Multipliers
 #define LPP_DIGITAL_INPUT_MULT 1
@@ -67,6 +69,7 @@
 #define LPP_WIND_SPEED_MULT 100
 #define LPP_WIND_GUST_MULT 100
 #define LPP_RAIN_MULT 10
+#define LPP_WIND_DIRECTION_STDDEV_MULT 10
 
 #define LPP_ERROR_OK 0
 #define LPP_ERROR_OVERFLOW 1
@@ -106,6 +109,7 @@ public:
       case LPP_WIND_SPEED:
       case LPP_WIND_GUST:
       case LPP_RAIN:
+      case LPP_WIND_DIRECTION_STDDEV:
         return 2;
     }
     return 1;
@@ -127,6 +131,7 @@ public:
       case LPP_BAROMETRIC_PRESSURE:
       case LPP_RELATIVE_HUMIDITY:
       case LPP_RAIN:
+      case LPP_WIND_DIRECTION_STDDEV:
         return 10;
     }
     return 1;

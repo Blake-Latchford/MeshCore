@@ -581,6 +581,7 @@ static void query_argent_wind(uint8_t ch, uint8_t, CayenneLPP& lpp) {
   }
   if (reading.hasDirection()) {
     lpp.addDirection(ch, reading.directionDegrees());
+    LPPRawField::addU16(lpp, ch, LPP_WIND_DIRECTION_STDDEV, reading.directionStddevTenthsDegrees());
   }
   if (reading.hasRain()) {
     LPPRawField::addU16(lpp, ch, LPP_RAIN, reading.rainTenthsMm());
