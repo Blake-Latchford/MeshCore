@@ -64,6 +64,15 @@ TEST(ArgentWindReading, StatusGatesEachValue) {
   EXPECT_FALSE(r.hasRain());
 }
 
+TEST(ArgentWindReading, StddevSkippedOnlyWhenZeroWithoutDirection) {
+  ArgentWindReading r;
+  r.status = ARGENT_WIND_STATUS_DIRECTION_VALID;
+  r.wind_direction_stddev = 0;      EXPECT_TRUE(r.hasDirectionStddev());   // steady wind
+  r.status = 0;
+  r.wind_direction_stddev = 0x0B61; EXPECT_TRUE(r.hasDirectionStddev());   // calm, but headings seen
+  r.wind_direction_stddev = 0;      EXPECT_FALSE(r.hasDirectionStddev());  // no valid headings
+}
+
 TEST(ArgentWindReading, DirectionInDegrees) {
   ArgentWindReading r;
   r.wind_direction = 0x0000; EXPECT_EQ(0, r.directionDegrees());

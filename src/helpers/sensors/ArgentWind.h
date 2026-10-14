@@ -41,6 +41,9 @@ struct ArgentWindReading {
 
   bool hasWind() const { return status & ARGENT_WIND_STATUS_WIND_VALID; }
   bool hasDirection() const { return status & ARGENT_WIND_STATUS_DIRECTION_VALID; }
+  // The board works out the spread even in a calm, when there's no mean heading. A zero spread with no valid
+  // direction means there were no valid headings at all.
+  bool hasDirectionStddev() const { return hasDirection() || wind_direction_stddev != 0; }
   bool hasRain() const { return status & ARGENT_WIND_STATUS_RAIN_VALID; }
 
   // Rounded to the nearest degree, 0-359.
